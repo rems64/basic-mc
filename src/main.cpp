@@ -15,6 +15,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "std_image.h"
 
+#define STB_PERLIN_IMPLEMENTATION
+#include "stb_perlin.h"
+
 using namespace std;
 
 typedef struct Transform
@@ -165,7 +168,8 @@ size_t chunk_id(uint32_t x, uint32_t y)
     return x + 16 * y;
 }
 
-inline int positive_mod(int i, int n) {
+inline int positive_mod(int i, int n)
+{
     return (i % n + n) % n;
 }
 
@@ -265,11 +269,15 @@ void generate_chunk(Chunk_t *chunk)
         {
             for (size_t y = 0; y < 16; y++)
             {
-                const float r = (float)rand() / (float)RAND_MAX;
-                uint8_t height = r * 2 + 16 * 3 + 8;
+                float scale = 0.1f;
+                uint8_t height = 32.f +
+                                 stb_perlin_noise3(scale * (x + chunk->x), scale * (y + chunk->y), 0.f, 0, 0, 0) * 5.f +
+                                 stb_perlin_noise3(0.2f * scale * (x + chunk->x), 0.2f * scale * (y + chunk->y), 0.f, 0, 0, 0) * 10.f;
                 for (size_t z = 0; z < 16; z++)
                 {
-                    bool air = (slice->z + z) >= height;
+                    float scale = 0.05f;
+                    float cave = stb_perlin_noise3(scale * (x+chunk->x), scale*(y+chunk->y), scale*(z+slice->z), 0, 0, 0);
+                    bool air = (slice->z + z) >= height || cave>=0.4f;
                     if (air)
                     {
                         slice->blocks[block_index(x, y, z)] = 0;
@@ -674,7 +682,7 @@ int main(int argc, char **argv)
     Camera_t camera = {};
     camera.fov = 60.f / 180.f * glm::pi<float>();
     camera.near = 0.1;
-    camera.far = 100.;
+    camera.far = 1000.;
     camera.position = glm::vec3(-10.f, -10.f, 10.f);
     C.main_camera = &camera;
 
@@ -688,7 +696,8 @@ int main(int argc, char **argv)
     {
         for (int j = 0; j < 10; j++)
         {
-            if (i==4 && j==3) continue;
+            // Test chunk removal
+            // if (i==4 && j==3) continue;
             Chunk_t *chunk = new Chunk_t;
             init_chunk(chunk, &world.section, j, i);
             generate_chunk(chunk);
