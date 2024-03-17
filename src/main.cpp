@@ -16,8 +16,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "std_image.h"
 
-#define STB_PERLIN_IMPLEMENTATION
-#include "stb_perlin.h"
+#include "blocks.h"
+#include "generation.h"
 
 using namespace std;
 
@@ -63,10 +63,6 @@ typedef struct mContext
     Camera_t *main_camera = nullptr;
 } mContext_t;
 
-typedef uint32_t BlockId_t;
-#define BLOCKID_AIR \
-    BlockId_t { 0 }
-
 typedef struct Block
 {
     BlockId_t block_id;
@@ -84,6 +80,7 @@ typedef struct Slice
     uint8_t index;
     std::vector<float> vertices;
     std::vector<unsigned int> indices;
+    unsigned int vao;
     unsigned int vbo;
     unsigned int ebo;
     std::vector<Block_t> table;
@@ -109,6 +106,7 @@ typedef struct Section
 typedef struct World
 {
     Section_t section;
+    Perlin_t heightmap;
 } World_t;
 
 // clang-format off
@@ -135,16 +133,26 @@ std::vector<unsigned int> cube_indices = {
     2, 3, 7,
     6, 2, 7
 };
+
+std::vector<float> fullscreen_rect_vertices = {
+    -1.0f, -1.0f,
+     1.0f, -1.0f,
+     1.0f,  1.0f,
+    -1.0f,  1.0f,
+};
+
+std::vector<unsigned int> fullscreen_rect_indices = {
+    0, 1, 3,
+    1, 2, 3
+};
 // clang-format on
 
-// TOP, FRONT, LEFT, BACK, RIGHT, BOTTOM
+#define LAND_GREEN                                  \
+    {                                               \
+        124.f / 255.f, 189.f / 255.f, 107.f / 255.f \
+    }
 
-std::unordered_map<BlockId_t, std::array<std::pair<std::pair<int, int>, std::pair<int, int>>, 6>> blocks_uvs{
-    {1, {std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0))}},       // Stone
-    {2, {std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0))}}, // Dirt
-    {3, {std::make_pair(std::make_pair(0, 0), std::make_pair(25, 11)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0))}},     // Grass
-    {4, {std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0))}}        // Bedrock
-};
+// TOP, FRONT, LEFT, BACK, RIGHT, BOTTOM
 
 const int TEXTURE_BLOCKS_WIDTH = 1024;
 const int TEXTURE_BLOCKS_HEIGHT = 512;
@@ -265,16 +273,18 @@ Block_t *get_block(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32_t x
     }
 }
 
-void generate_chunk(Chunk_t *chunk)
+void generate_chunk(World_t *world, Chunk_t *chunk)
 {
     for (size_t slice_index = 0; slice_index < 12; slice_index++)
     {
         Slice_t *slice = &chunk->slices[slice_index];
-        slice->table.push_back(block_air);                         // AIR
-        slice->table.push_back(Block_t{1});                        // STONE
-        slice->table.push_back(Block_t{2});                        // DIRT
-        slice->table.push_back(Block_t{3, {124.f/255.f, 189.f/255.f, 107.f/255.f}}); // GRASS
-        slice->table.push_back(Block_t{4});                        // BEDROCK
+        slice->table.push_back(block_air);              // AIR
+        slice->table.push_back(Block_t{1});             // STONE
+        slice->table.push_back(Block_t{2});             // DIRT
+        slice->table.push_back(Block_t{3, LAND_GREEN}); // GRASS
+        slice->table.push_back(Block_t{4});             // BEDROCK
+        slice->table.push_back(Block_t{5});             // OAK LOG
+        slice->table.push_back(Block_t{6, LAND_GREEN}); // OAK LEAVE
         slice->index = slice_index;
         slice->z = 16 * slice_index;
         for (size_t x = 0; x < 16; x++)
@@ -284,9 +294,10 @@ void generate_chunk(Chunk_t *chunk)
             {
                 double block_y = y + chunk->y;
                 float scale = 0.1f;
-                uint8_t height = 50.f +
-                                 stb_perlin_noise3(scale * block_x, scale * block_y, 0.f, 0, 0, 0) * 5.f +
-                                 stb_perlin_noise3(0.2f * scale * block_x, 0.2f * scale * block_y, 0.f, 0, 0, 0) * 10.f;
+                uint8_t height = sample_perlin(&world->heightmap, block_x, block_y, 0.f);
+                // uint8_t height = 50.f +
+                //                  stb_perlin_noise3(scale * block_x, scale * block_y, 0.f, 0, 0, 0) * 5.f +
+                //                  stb_perlin_noise3(0.2f * scale * block_x, 0.2f * scale * block_y, 0.f, 0, 0, 0) * 10.f;
                 uint8_t dirt_height = (0.5f + 0.5f * stb_perlin_noise3(scale * block_x, scale * block_y, 0.f, 0, 0, 0)) * 5.f;
                 for (size_t z = 0; z < 16; z++)
                 {
@@ -314,6 +325,49 @@ void generate_chunk(Chunk_t *chunk)
                 }
             }
         }
+    }
+}
+
+uint16_t *get_global_block(World_t *world, int64_t x, int64_t y, int64_t z)
+{
+    if (x < 0 || y < 0 || x > 256 || y > 256 || z < 0 || z > 16 * 24)
+        return NULL;
+    Section_t *section = &world->section;
+    int64_t chunk_x = x / 16;
+    int64_t chunk_y = y / 16;
+    Chunk_t *chunk = section->chunks[chunk_id(x / 16, y / 16)];
+    Slice_t *slice = &chunk->slices[z / 16];
+    uint8_t block_x = x - chunk->x;
+    uint8_t block_y = y - chunk->y;
+    uint8_t block_z = z - slice->z;
+    return &slice->blocks[block_index(block_x, block_y, block_z)];
+}
+
+void fill_rect(World_t *world, glm::vec3 min, glm::vec3 max, int16_t val)
+{
+    for (int64_t x = min.x; x <= max.x; x++)
+    {
+        for (int64_t y = min.y; y <= max.y; y++)
+        {
+            for (int64_t z = min.z; z <= max.z; z++)
+            {
+                uint16_t *block = get_global_block(world, x, y, z);
+                if (block != NULL)
+                    *block = val;
+            }
+        }
+    }
+}
+
+void spawn_tree(World_t *world, glm::vec3 position, uint32_t height)
+{
+    glm::vec3 top = position + glm::vec3(0, 0, height);
+    fill_rect(world, top - glm::vec3(1, 1, 1), top + glm::vec3(1, 1, 1), 6);
+    for (size_t i = 0; i < height; i++)
+    {
+        uint16_t *block = get_global_block(world, position.x, position.y, position.z + i);
+        if (block != NULL)
+            *block = 5; // WOOD
     }
 }
 
@@ -482,6 +536,7 @@ void buildUi()
     ImGui::Text("dt %ims", C.dt);
     ImGui::Text("draw count %i", C.dc);
     ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 0, 240);
+    ImGui::Text("position: %f, %f, %f", C.main_camera->position.x, C.main_camera->position.y, C.main_camera->position.z);
     ImGui::End();
 }
 
@@ -609,12 +664,32 @@ void mousewheel_callback(GLFWwindow *window, double wheel_x, double wheel_y)
 
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    if (C.input.mouse_capture)
+    ImGuiIO &io = ImGui::GetIO();
+    static float fov_backup = 0.f;
+    if (!io.WantCaptureKeyboard)
     {
-        Camera_t *camera = C.main_camera;
-        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        if (C.input.mouse_capture)
         {
-            set_capture_cursor(window, false);
+            Camera_t *camera = C.main_camera;
+            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+            {
+                set_capture_cursor(window, false);
+            }
+            if (key == GLFW_KEY_R && action == GLFW_PRESS)
+            {
+                camera->position = glm::vec3(0.f);
+                camera->pitch = 0.f;
+                camera->yaw = 0.f;
+            }
+            if (key == GLFW_KEY_C && action == GLFW_PRESS)
+            {
+                fov_backup = camera->fov;
+                camera->fov = camera->fov / 4;
+            }
+            if (key == GLFW_KEY_C && action == GLFW_RELEASE)
+            {
+                camera->fov = fov_backup;
+            }
         }
     }
 }
@@ -661,10 +736,69 @@ void init_world(World_t *world)
 {
     world->section.x = 0;
     world->section.y = 0;
+    float freqs[] = {0.01f, 0.06f};
+    float offsets[] = {30.f, 0.f};
+    float ampls[] = {8.f, 1.f};
+    init_perlin(&world->heightmap, freqs, offsets, ampls);
     for (size_t chunk_id = 0; chunk_id < sizeof(world->section.chunks) / sizeof(Chunk_t *); chunk_id++)
     {
         world->section.chunks[chunk_id] = nullptr;
     }
+}
+
+void free_world(World_t *world)
+{
+    free_perlin(&world->heightmap);
+}
+
+void record_framebuffer(unsigned int *gBuffer, unsigned int *gPosition, unsigned int *gNormal, unsigned int *gColor, uint32_t width, uint32_t height)
+{
+    if (*gBuffer != 0)
+        glDeleteFramebuffers(1, gBuffer);
+    if (*gPosition != 0)
+        glDeleteTextures(1, gPosition);
+    if (*gNormal != 0)
+        glDeleteTextures(1, gNormal);
+    if (*gColor != 0)
+        glDeleteTextures(1, gColor);
+    
+    glGenFramebuffers(1, gBuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, *gBuffer);
+
+    // - position color buffer
+    glGenTextures(1, gPosition);
+    glBindTexture(GL_TEXTURE_2D, *gPosition);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *gPosition, 0);
+    // normal color buffer
+    glGenTextures(1, gNormal);
+    glBindTexture(GL_TEXTURE_2D, *gNormal);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, *gNormal, 0);
+    // color + specular color buffer
+    glGenTextures(1, gColor);
+    glBindTexture(GL_TEXTURE_2D, *gColor);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, *gColor, 0);
+    // tell OpenGL which color attachments we'll use (of this framebuffer) for rendering
+    unsigned int attachments[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+    glDrawBuffers(3, attachments);
+
+    unsigned int rboDepth;
+    glGenRenderbuffers(1, &rboDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cout << "Framebuffer not complete!" << std::endl;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 int main(int argc, char **argv)
@@ -676,6 +810,10 @@ int main(int argc, char **argv)
 
     static int screen_width = 1280;
     static int screen_height = 720;
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     GLFWwindow *window = glfwCreateWindow(screen_width, screen_height, "Minecraft mais beaucoup moins bien et avec plein de bugs", NULL, NULL);
     if (!window)
@@ -702,6 +840,9 @@ int main(int argc, char **argv)
     // Shader creation
     unsigned int cube_shader_program;
     create_shader("resources/blocks.vert", "resources/blocks.frag", &cube_shader_program);
+
+    unsigned int deferred_shader_program;
+    create_shader("resources/deferred.vert", "resources/deferred.frag", &deferred_shader_program);
 
     // Texture
     int texture_width, texture_height, texture_depth;
@@ -746,10 +887,17 @@ int main(int argc, char **argv)
             // if (i==4 && j==3) continue;
             Chunk_t *chunk = new Chunk_t;
             init_chunk(chunk, &world.section, j, i);
-            generate_chunk(chunk);
+            generate_chunk(&world, chunk);
             world.section.chunks[chunk_id(j, i)] = chunk;
         }
     }
+    for (size_t i = 0; i < 40; i++)
+    {
+        const int64_t x = (float)rand() / (float)RAND_MAX * 10 * 16;
+        const int64_t y = (float)rand() / (float)RAND_MAX * 10 * 16;
+        spawn_tree(&world, glm::vec3(x, y, sample_perlin(&world.heightmap, x, y, 0) + 1), 4);
+    }
+
     for (int i = 0; i < 16; i++)
     {
         for (int j = 0; j < 16; j++)
@@ -757,25 +905,55 @@ int main(int argc, char **argv)
             Chunk_t *chunk = world.section.chunks[chunk_id(j, i)];
             if (chunk == NULL)
                 continue;
-            for (size_t slice_index = 0; slice_index < 4; slice_index++)
+            for (size_t slice_index = 0; slice_index < 10; slice_index++)
             {
                 Slice_t *slice = &chunk->slices[slice_index];
                 generate_slice_mesh(&world, &slice->vertices, &slice->indices, chunk, slice_index);
-                // VBO
+                // VAO
+                glGenVertexArrays(1, &slice->vao);
                 glGenBuffers(1, &slice->vbo);
+                glGenBuffers(1, &slice->ebo);
+
+                glBindVertexArray(slice->vao);
+
+                // VBO
                 glBindBuffer(GL_ARRAY_BUFFER, slice->vbo);
                 glBufferData(GL_ARRAY_BUFFER, slice->vertices.size() * sizeof(float), slice->vertices.data(), GL_STATIC_DRAW);
-
                 // EBO
-                glGenBuffers(1, &slice->ebo);
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->ebo);
                 glBufferData(GL_ELEMENT_ARRAY_BUFFER, slice->indices.size() * sizeof(unsigned int), slice->indices.data(), GL_STATIC_DRAW);
+
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)0);
+                glEnableVertexAttribArray(0);
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(3 * sizeof(float)));
+                glEnableVertexAttribArray(1);
+                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(6 * sizeof(float)));
+                glEnableVertexAttribArray(2);
+                glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(8 * sizeof(float)));
+                glEnableVertexAttribArray(3);
+                glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(10 * sizeof(float)));
+                glEnableVertexAttribArray(4);
             }
         }
     }
 
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
+    unsigned int gBuffer, gPosition, gNormal, gColor = 0;
+
+    record_framebuffer(&gBuffer, &gPosition, &gNormal, &gColor, screen_width, screen_height);
+
+    unsigned int fullscreen_vao, fullscreen_vbo, fullscreen_ebo;
+    glGenVertexArrays(1, &fullscreen_vao);
+    glGenBuffers(1, &fullscreen_vbo);
+    glGenBuffers(1, &fullscreen_ebo);
+    glBindVertexArray(fullscreen_vao);
+    // VBO
+    glBindBuffer(GL_ARRAY_BUFFER, fullscreen_vbo);
+    glBufferData(GL_ARRAY_BUFFER, fullscreen_rect_vertices.size() * sizeof(float), fullscreen_rect_vertices.data(), GL_STATIC_DRAW);
+    // EBO
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, fullscreen_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, fullscreen_rect_indices.size() * sizeof(unsigned int), fullscreen_rect_indices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
 
     float t = 0;
 
@@ -788,8 +966,6 @@ int main(int argc, char **argv)
 
     while (!glfwWindowShouldClose(window))
     {
-        glfwPollEvents();
-
         C.dc = 0;
         double current_time = glfwGetTime();
         double elapsed_time = current_time - last_time;
@@ -807,51 +983,83 @@ int main(int argc, char **argv)
         glm::mat4 view = glm::lookAt(camera->position, camera->position + camera->direction, camera->up);
         glm::mat4 projection = glm::perspective(camera->fov, (float)screen_width / (float)screen_height, camera->near, camera->far);
         glm::mat4 VP = projection * view;
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(VP));
+
+        int new_width, new_height;
+        glfwGetFramebufferSize(window, &new_width, &new_height);
+        if (new_width!=screen_width || new_height!=screen_height)
+        {
+            record_framebuffer(&gBuffer, &gPosition, &gNormal, &gColor, new_width, new_height);
+        }
+        screen_width = new_width;
+        screen_height = new_height;
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        glfwGetFramebufferSize(window, &screen_width, &screen_height);
-        glViewport(0, 0, screen_width, screen_height);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Rendering goes here
+        // Render to g-buffer
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glViewport(0, 0, screen_width, screen_height);
+
+        glUseProgram(cube_shader_program);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(VP));
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blocks_texture);
+
         for (size_t i = 0; i < sizeof(world.section.chunks) / sizeof(Chunk_t *); i++)
         {
             if (world.section.chunks[i] == nullptr)
                 continue;
             Chunk_t *chunk = world.section.chunks[i];
-            for (size_t slice_index = 0; slice_index < 16; slice_index++)
+            for (size_t slice_index = 0; slice_index < 24; slice_index++)
             {
                 Slice_t *slice = &chunk->slices[slice_index];
                 if (slice == nullptr)
                     continue;
                 const size_t count = slice->indices.size();
-                glBindTexture(GL_TEXTURE_2D, blocks_texture);
-                glBindBuffer(GL_ARRAY_BUFFER, slice->vbo);
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->ebo);
+                if (count == 0)
+                    continue;
+                glBindVertexArray(slice->vao);
 
-                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)0);
-                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(3 * sizeof(float)));
-                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(6 * sizeof(float)));
-                glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(8 * sizeof(float)));
-                glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(10 * sizeof(float)));
-                glEnableVertexAttribArray(0);
-                glEnableVertexAttribArray(1);
-                glEnableVertexAttribArray(2);
-                glEnableVertexAttribArray(3);
-                glEnableVertexAttribArray(4);
                 glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
                 C.dc++;
             }
         }
 
+        // Deferred
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glViewport(0, 0, screen_width, screen_height);
+
+        glUseProgram(deferred_shader_program);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, gPosition);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, gNormal);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, gColor);
+
+        glBindVertexArray(fullscreen_vao);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
         buildUi();
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
+        glfwPollEvents();
         last_time = current_time;
     }
     for (size_t i = 0; i < sizeof(world.section.chunks) / sizeof(Chunk_t *); i++)
@@ -861,6 +1069,7 @@ int main(int argc, char **argv)
             free(world.section.chunks[i]);
         }
     }
+    free_world(&world);
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
