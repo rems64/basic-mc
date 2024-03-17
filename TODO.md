@@ -1,4 +1,3 @@
-- deferred rendering
 - unified blocks access
 - generate uvs on gpu
 - lights
