@@ -4,6 +4,8 @@ add_requires("glfw")
 add_requires('imgui', {configs = {glfw_opengl3 = true}})
 add_requires("glm")
 
+set_languages("cxx17")
+
 target("glad")
     set_kind("static")
     add_includedirs("lib/glad/include", {public = true})

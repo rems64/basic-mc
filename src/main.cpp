@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <array>
 #include <unordered_map>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -56,6 +57,7 @@ typedef struct mContext
 {
     int fps = 0;
     int dt = 0;
+    uint32_t target_fps = 60;
     uint32_t dc = 0;
     mInput_t input;
     Camera_t *main_camera = nullptr;
@@ -68,7 +70,10 @@ typedef uint32_t BlockId_t;
 typedef struct Block
 {
     BlockId_t block_id;
+    glm::vec3 tint = {1., 1., 1.};
 } Block_t;
+
+static Block_t block_air = {BlockId_t{0}};
 
 // Slice: 16x16x16
 // Chunk: 16x16x384, 24 slices high
@@ -132,9 +137,14 @@ std::vector<unsigned int> cube_indices = {
 };
 // clang-format on
 
-std::unordered_map<BlockId_t, std::pair<int, int>> blocks_uvs{
-    {1, std::make_pair(6, 26)},
-    {2, std::make_pair(10, 14)}};
+// TOP, FRONT, LEFT, BACK, RIGHT, BOTTOM
+
+std::unordered_map<BlockId_t, std::array<std::pair<std::pair<int, int>, std::pair<int, int>>, 6>> blocks_uvs{
+    {1, {std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0)), std::make_pair(std::make_pair(6, 26), std::make_pair(0, 0))}},       // Stone
+    {2, {std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0))}}, // Dirt
+    {3, {std::make_pair(std::make_pair(0, 0), std::make_pair(25, 11)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(25, 8), std::make_pair(25, 9)), std::make_pair(std::make_pair(21, 13), std::make_pair(0, 0))}},     // Grass
+    {4, {std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0)), std::make_pair(std::make_pair(11, 0), std::make_pair(0, 0))}}        // Bedrock
+};
 
 const int TEXTURE_BLOCKS_WIDTH = 1024;
 const int TEXTURE_BLOCKS_HEIGHT = 512;
@@ -173,7 +183,7 @@ inline int positive_mod(int i, int n)
     return (i % n + n) % n;
 }
 
-BlockId_t get_block_id(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32_t x, int32_t y, int32_t z)
+Block_t *get_block(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32_t x, int32_t y, int32_t z)
 {
     int32_t slice_x = positive_mod(x, 16);
     int32_t slice_y = positive_mod(y, 16);
@@ -182,62 +192,62 @@ BlockId_t get_block_id(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32
     if (x < 0)
     {
         if (chunk->section_x <= 0)
-            return BLOCKID_AIR;
+            return &block_air;
         Chunk_t *concerned_chunk = section->chunks[chunk_id(chunk->section_x - 1, chunk->section_y)];
         if (concerned_chunk == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &concerned_chunk->slices[slice->index];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     if (x > 15)
     {
         if (chunk->section_x >= 15)
-            return BLOCKID_AIR;
+            return &block_air;
         Chunk_t *concerned_chunk = section->chunks[chunk_id(chunk->section_x + 1, chunk->section_y)];
         if (concerned_chunk == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &concerned_chunk->slices[slice->index];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     if (y < 0)
     {
         if (chunk->section_y <= 0)
-            return BLOCKID_AIR;
+            return &block_air;
         Chunk_t *concerned_chunk = section->chunks[chunk_id(chunk->section_x, chunk->section_y - 1)];
         if (concerned_chunk == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &concerned_chunk->slices[slice->index];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     if (y > 15)
     {
         if (chunk->section_y >= 15)
-            return BLOCKID_AIR;
+            return &block_air;
         Chunk_t *concerned_chunk = section->chunks[chunk_id(chunk->section_x, chunk->section_y + 1)];
         if (concerned_chunk == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &concerned_chunk->slices[slice->index];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     if (z < 0)
     {
         if (slice->index <= 0)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &chunk->slices[slice->index - 1];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     if (z > 15)
     {
         if (slice->index >= 23)
-            return BLOCKID_AIR;
+            return &block_air;
         concerned_slice = &chunk->slices[slice->index + 1];
         if (concerned_slice == NULL)
-            return BLOCKID_AIR;
+            return &block_air;
     }
     const size_t blocks_count = concerned_slice->table.size();
     if (blocks_count == 0)
@@ -247,11 +257,11 @@ BlockId_t get_block_id(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32
     }
     else if (blocks_count == 1)
     {
-        return concerned_slice->table[0].block_id;
+        return &concerned_slice->table[0];
     }
     else
     {
-        return concerned_slice->table[concerned_slice->blocks[block_index(slice_x, slice_y, slice_z)]].block_id;
+        return &concerned_slice->table[concerned_slice->blocks[block_index(slice_x, slice_y, slice_z)]];
     }
 }
 
@@ -260,33 +270,46 @@ void generate_chunk(Chunk_t *chunk)
     for (size_t slice_index = 0; slice_index < 12; slice_index++)
     {
         Slice_t *slice = &chunk->slices[slice_index];
-        slice->table.push_back(Block_t{0}); // AIR
-        slice->table.push_back(Block_t{1}); // STONE
-        slice->table.push_back(Block_t{2}); // COAL
+        slice->table.push_back(block_air);                         // AIR
+        slice->table.push_back(Block_t{1});                        // STONE
+        slice->table.push_back(Block_t{2});                        // DIRT
+        slice->table.push_back(Block_t{3, {124.f/255.f, 189.f/255.f, 107.f/255.f}}); // GRASS
+        slice->table.push_back(Block_t{4});                        // BEDROCK
         slice->index = slice_index;
         slice->z = 16 * slice_index;
         for (size_t x = 0; x < 16; x++)
         {
+            double block_x = x + chunk->x;
             for (size_t y = 0; y < 16; y++)
             {
+                double block_y = y + chunk->y;
                 float scale = 0.1f;
-                uint8_t height = 32.f +
-                                 stb_perlin_noise3(scale * (x + chunk->x), scale * (y + chunk->y), 0.f, 0, 0, 0) * 5.f +
-                                 stb_perlin_noise3(0.2f * scale * (x + chunk->x), 0.2f * scale * (y + chunk->y), 0.f, 0, 0, 0) * 10.f;
+                uint8_t height = 50.f +
+                                 stb_perlin_noise3(scale * block_x, scale * block_y, 0.f, 0, 0, 0) * 5.f +
+                                 stb_perlin_noise3(0.2f * scale * block_x, 0.2f * scale * block_y, 0.f, 0, 0, 0) * 10.f;
+                uint8_t dirt_height = (0.5f + 0.5f * stb_perlin_noise3(scale * block_x, scale * block_y, 0.f, 0, 0, 0)) * 5.f;
                 for (size_t z = 0; z < 16; z++)
                 {
+                    int block_z = z + slice->z;
+                    const float r = (float)rand() / (float)RAND_MAX;
+                    bool bedrock = block_z == 0 || (block_z / 3.f) * (block_z / 3.f) < r;
+                    if (bedrock)
+                    {
+                        slice->blocks[block_index(x, y, z)] = 4;
+                        continue;
+                    }
                     float scale = 0.05f;
-                    float cave = stb_perlin_noise3(scale * (x+chunk->x), scale*(y+chunk->y), scale*(z+slice->z), 0, 0, 0);
-                    bool air = (slice->z + z) >= height || cave>=0.4f;
+                    float cave = stb_perlin_noise3(scale * block_x, scale * block_y, scale * block_z, 0, 0, 0);
+                    bool air = block_z > height || cave >= 0.4f;
                     if (air)
                     {
                         slice->blocks[block_index(x, y, z)] = 0;
                     }
                     else
                     {
-                        const float r = (float)rand() / (float)RAND_MAX;
-                        const bool coal = r > 0.8f;
-                        slice->blocks[block_index(x, y, z)] = coal ? 2 : 1;
+                        bool top_layer = block_z == height;
+                        bool dirt_zone = (height - block_z) <= dirt_height;
+                        slice->blocks[block_index(x, y, z)] = top_layer ? 3 : (dirt_zone ? 2 : 1);
                     }
                 }
             }
@@ -316,15 +339,15 @@ void push_indices(std::vector<unsigned int> *indices, size_t offset, float norma
     }
 }
 
-void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y)
+void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
 {
-    size_t offset = vertices->size() / 8;
+    size_t offset = vertices->size() / 13;
     // clang-format off
     const std::vector<float> new_vertices = {
-        (float)x, (float)y, (float)z, (float)normal_direction, 0.f, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y,
-        (float)x, (float)y+1.f, (float)z, (float)normal_direction, 0.f, 0.f, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y,
-        (float)x, (float)y+1.f, (float)z+1.f, (float)normal_direction, 0.f, 0.f, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y,
-        (float)x, (float)y, (float)z+1.f, (float)normal_direction, 0.f, 0.f, 0.f+uv_x, 0.f+uv_y
+        (float)x, (float)y, (float)z, (float)normal_direction, 0.f, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y, 0.f+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x, (float)y+1.f, (float)z, (float)normal_direction, 0.f, 0.f, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x, (float)y+1.f, (float)z+1.f, (float)normal_direction, 0.f, 0.f, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x, (float)y, (float)z+1.f, (float)normal_direction, 0.f, 0.f, 0.f+uv_x, 0.f+uv_y, 0.f+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b
     };
     // clang-format on
 
@@ -334,15 +357,15 @@ void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices
     push_indices(indices, offset, -normal_direction);
 }
 
-void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y)
+void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
 {
-    size_t offset = vertices->size() / 8;
+    size_t offset = vertices->size() / 13;
     // clang-format off
     const std::vector<float> new_vertices = {
-        (float)x, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y,
-        (float)x+1.f, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y,
-        (float)x+1.f, (float)y, (float)z+1.f, 0.f, (float)normal_direction, 0.f, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y,
-        (float)x, (float)y, (float)z+1.f, 0.f, (float)normal_direction, 0.f, 0.f+uv_x, 0.f+uv_y
+        (float)x, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y, 0.f+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x+1.f, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x+1.f, (float)y, (float)z+1.f, 0.f, (float)normal_direction, 0.f, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x, (float)y, (float)z+1.f, 0.f, (float)normal_direction, 0.f, 0.f+uv_x, 0.f+uv_y, 0.f+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b
     };
     // clang-format on
 
@@ -352,15 +375,15 @@ void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices
     push_indices(indices, offset, normal_direction);
 }
 
-void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y)
+void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
 {
-    size_t offset = vertices->size() / 8;
+    size_t offset = vertices->size() / 13;
     // clang-format off
     const std::vector<float> new_vertices = {
-        (float)x, (float)y, (float)z, 0.f, 0.f, (float)normal_direction, 0.f+uv_x, 0.f+uv_y,
-        (float)x+1.f, (float)y, (float)z, 0.f, 0.f, (float)normal_direction, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y,
-        (float)x+1.f, (float)y+1.f, (float)z, 0.f, 0.f, (float)normal_direction, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y,
-        (float)x, (float)y+1.f, (float)z, 0.f, 0.f, (float)normal_direction, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y
+        (float)x, (float)y, (float)z, 0.f, 0.f, (float)normal_direction, 0.f+uv_x, 0.f+uv_y, 0.f+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x+1.f, (float)y, (float)z, 0.f, 0.f, (float)normal_direction, TEXTURE_TILE_WIDTH+uv_x, 0.f+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x+1.f, (float)y+1.f, (float)z, 0.f, 0.f, (float)normal_direction, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
+        (float)x, (float)y+1.f, (float)z, 0.f, 0.f, (float)normal_direction, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y, 0.f+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b
     };
     // clang-format on
 
@@ -368,6 +391,12 @@ void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices
     vertices->insert(vertices->end(), new_vertices.begin(), new_vertices.end());
 
     push_indices(indices, offset, -normal_direction);
+}
+
+std::pair<std::pair<float, float>, std::pair<float, float>> get_uv_offset(BlockId_t block_id, uint8_t face)
+{
+    const std::array<std::pair<std::pair<int, int>, std::pair<int, int>>, 6> uv_offsets = blocks_uvs[block_id];
+    return std::make_pair(std::make_pair(16.f * uv_offsets[face].first.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].first.second / TEXTURE_BLOCKS_HEIGHT), std::make_pair(16.f * uv_offsets[face].second.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].second.second / TEXTURE_BLOCKS_HEIGHT));
 }
 
 void generate_slice_mesh(World_t *world, std::vector<float> *vertices, std::vector<unsigned int> *indices, Chunk_t *chunk, uint8_t slice_index)
@@ -383,45 +412,61 @@ void generate_slice_mesh(World_t *world, std::vector<float> *vertices, std::vect
         {
             for (size_t z = 0; z < 16; z++)
             {
-                BlockId_t current_block_id = get_block_id(section, chunk, slice, x, y, z);
+                Block_t *current_block = get_block(section, chunk, slice, x, y, z);
+                BlockId_t current_block_id = current_block->block_id;
                 // If air
                 if (current_block_id == 0)
                 {
                     continue;
                 }
-                bool g_top = (get_block_id(section, chunk, slice, x, y, z + 1) == 0);
-                bool g_bottom = (get_block_id(section, chunk, slice, x, y, z - 1) == 0);
-                bool g_left = (get_block_id(section, chunk, slice, x - 1, y, z) == 0);
-                bool g_right = (get_block_id(section, chunk, slice, x + 1, y, z) == 0);
-                bool g_front = (get_block_id(section, chunk, slice, x, y - 1, z) == 0);
-                bool g_back = (get_block_id(section, chunk, slice, x, y + 1, z) == 0);
+                bool g_top = (get_block(section, chunk, slice, x, y, z + 1)->block_id == 0);
+                bool g_bottom = (get_block(section, chunk, slice, x, y, z - 1)->block_id == 0);
+                bool g_left = (get_block(section, chunk, slice, x - 1, y, z)->block_id == 0);
+                bool g_right = (get_block(section, chunk, slice, x + 1, y, z)->block_id == 0);
+                bool g_front = (get_block(section, chunk, slice, x, y - 1, z)->block_id == 0);
+                bool g_back = (get_block(section, chunk, slice, x, y + 1, z)->block_id == 0);
 
-                const std::pair<int, int> uv_offset = blocks_uvs[current_block_id];
-                float uv_offset_x = 16.f * uv_offset.first / TEXTURE_BLOCKS_WIDTH;
-                float uv_offset_y = 16.f * uv_offset.second / TEXTURE_BLOCKS_HEIGHT;
                 if (g_left)
                 {
-                    add_face_x(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 2);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_x(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
                 if (g_right)
                 {
-                    add_face_x(vertices, indices, x + slice_x + 1, y + slice_y, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 4);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_x(vertices, indices, x + slice_x + 1, y + slice_y, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
                 if (g_front)
                 {
-                    add_face_y(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 1);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_y(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
                 if (g_back)
                 {
-                    add_face_y(vertices, indices, x + slice_x, y + slice_y + 1, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 3);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_y(vertices, indices, x + slice_x, y + slice_y + 1, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
                 if (g_bottom)
                 {
-                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 5);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
                 if (g_top)
                 {
-                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z + 1, slice_z, 1, uv_offset_x, uv_offset_y);
+                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 0);
+                    auto [uv_offset_x, uv_offset_y] = uv_offset;
+                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
+                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z + 1, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
                 }
             }
         }
@@ -436,6 +481,7 @@ void buildUi()
     ImGui::Text("FPS %i", C.fps);
     ImGui::Text("dt %ims", C.dt);
     ImGui::Text("draw count %i", C.dc);
+    ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 0, 240);
     ImGui::End();
 }
 
@@ -738,7 +784,6 @@ int main(int argc, char **argv)
     glfwSetScrollCallback(window, mousewheel_callback);
     glfwSetKeyCallback(window, key_callback);
 
-    double target_fps = 60.f;
     double last_frame_time = 0.f;
 
     while (!glfwWindowShouldClose(window))
@@ -748,7 +793,7 @@ int main(int argc, char **argv)
         C.dc = 0;
         double current_time = glfwGetTime();
         double elapsed_time = current_time - last_time;
-        if (elapsed_time < 1 / target_fps)
+        if (C.target_fps > 0 && elapsed_time < 1.f / (float)C.target_fps)
         {
             continue;
         }
@@ -788,12 +833,16 @@ int main(int argc, char **argv)
                 glBindBuffer(GL_ARRAY_BUFFER, slice->vbo);
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->ebo);
 
-                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)0);
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(3 * sizeof(float)));
+                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(6 * sizeof(float)));
+                glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(8 * sizeof(float)));
+                glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(10 * sizeof(float)));
                 glEnableVertexAttribArray(0);
                 glEnableVertexAttribArray(1);
                 glEnableVertexAttribArray(2);
+                glEnableVertexAttribArray(3);
+                glEnableVertexAttribArray(4);
                 glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
                 C.dc++;
             }
