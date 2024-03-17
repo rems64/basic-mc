@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <array>
+#include <string>
 #include <unordered_map>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -53,6 +54,11 @@ typedef struct mInput
     bool mouse_capture = false;
 } mInput_t;
 
+typedef struct mDebugContext
+{
+    float ssao_strength = 1.f;
+} mDebugContext_t;
+
 typedef struct mContext
 {
     int fps = 0;
@@ -60,6 +66,7 @@ typedef struct mContext
     uint32_t target_fps = 60;
     uint32_t dc = 0;
     mInput_t input;
+    mDebugContext_t debug;
     Camera_t *main_camera = nullptr;
 } mContext_t;
 
@@ -535,6 +542,7 @@ void buildUi()
     ImGui::Text("FPS %i", C.fps);
     ImGui::Text("dt %ims", C.dt);
     ImGui::Text("draw count %i", C.dc);
+    ImGui::SliderFloat("SSAO strength %f", &C.debug.ssao_strength, 0.f, 1.f);
     ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 0, 240);
     ImGui::Text("position: %f, %f, %f", C.main_camera->position.x, C.main_camera->position.y, C.main_camera->position.z);
     ImGui::End();
@@ -761,7 +769,7 @@ void record_framebuffer(unsigned int *gBuffer, unsigned int *gPosition, unsigned
         glDeleteTextures(1, gNormal);
     if (*gColor != 0)
         glDeleteTextures(1, gColor);
-    
+
     glGenFramebuffers(1, gBuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, *gBuffer);
 
@@ -955,7 +963,42 @@ int main(int argc, char **argv)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
 
-    float t = 0;
+    // SSAO
+    std::vector<glm::vec3> ssaoKernel;
+    for (unsigned int i = 0; i < 64; ++i)
+    {
+        glm::vec3 sample(
+            (float)rand() / (float)RAND_MAX * 2.0 - 1.0,
+            (float)rand() / (float)RAND_MAX * 2.0 - 1.0,
+            (float)rand() / (float)RAND_MAX);
+        sample = glm::normalize(sample);
+        sample *= (float)rand() / (float)RAND_MAX;
+        float scale = (float)i / 64.0;
+        scale = 0.1f + (scale * scale) * 0.9f;
+        sample *= scale;
+        ssaoKernel.push_back(sample);
+    }
+    int samples_loc = glGetUniformLocation(deferred_shader_program, "hemisphere_samples");
+
+    std::vector<glm::vec3> ssaoNoise;
+    for (unsigned int i = 0; i < 16; i++)
+    {
+        glm::vec3 noise(
+            (float)rand() / (float)RAND_MAX * 2.0 - 1.0,
+            (float)rand() / (float)RAND_MAX * 2.0 - 1.0,
+            0.0f);
+        ssaoNoise.push_back(noise);
+    }
+
+
+    unsigned int noiseTexture;
+    glGenTextures(1, &noiseTexture);
+    glBindTexture(GL_TEXTURE_2D, noiseTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 4, 4, 0, GL_RGB, GL_FLOAT, &ssaoNoise[0]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
@@ -975,7 +1018,6 @@ int main(int argc, char **argv)
         }
         C.fps = int(1. / elapsed_time);
         C.dt = int(1000. * elapsed_time);
-        t += elapsed_time;
 
         update_player(window);
         Camera_t *camera = C.main_camera;
@@ -986,7 +1028,7 @@ int main(int argc, char **argv)
 
         int new_width, new_height;
         glfwGetFramebufferSize(window, &new_width, &new_height);
-        if (new_width!=screen_width || new_height!=screen_height)
+        if (new_width != screen_width || new_height != screen_height)
         {
             record_framebuffer(&gBuffer, &gPosition, &gNormal, &gColor, new_width, new_height);
         }
@@ -1044,12 +1086,19 @@ int main(int argc, char **argv)
         glViewport(0, 0, screen_width, screen_height);
 
         glUseProgram(deferred_shader_program);
+        glUniformMatrix4fv(glGetUniformLocation(deferred_shader_program, "projection"), 1, GL_FALSE, glm::value_ptr(VP));
+        glUniform1fv(glGetUniformLocation(deferred_shader_program, "ssao_strength"), 1, &C.debug.ssao_strength); 
+        for (unsigned int i = 0; i < 64; ++i)
+            glUniform3fv(glGetUniformLocation(deferred_shader_program, ("hemisphere_samples[" + std::to_string(i) + "]").c_str()), 1, &ssaoKernel[i][0]); 
+        
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, gPosition);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, gNormal);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, gColor);
+        glActiveTexture(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_2D, noiseTexture);
 
         glBindVertexArray(fullscreen_vao);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
