@@ -1,3 +1,6 @@
+#ifndef BLOCKS_H
+#define BLOCKS_H
+
 #include <unordered_map>
 #include <array>
 
@@ -21,3 +24,5 @@ std::unordered_map<BlockId_t, std::array<std::pair<std::pair<int, int>, std::pai
     // Oak leaves
     {6, {std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18)), std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18)), std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18)), std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18)), std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18)), std::make_pair(std::make_pair(0, 0), std::make_pair(4, 18))}}
 };
+
+#endif
