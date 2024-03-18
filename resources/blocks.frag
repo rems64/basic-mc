@@ -18,5 +18,9 @@ void main()
 
    gPosition = Pos;
    gNormal = normalize(Normal);
-   gAlbedo = vec4(Tint, 1.0)*overlay.a*overlay+(1.0-overlay.a)*color;
+   vec4 res = vec4(Tint, 1.0)*overlay.a*overlay+(1.0-overlay.a)*color; 
+   if (res.a<0.5) {
+      discard;
+   }
+   gAlbedo = res;
 }
