@@ -50,7 +50,8 @@ void main()
     float ambiant = 0.4f;
     float luminosity = min(1.f, ambiant+max(0.f, -dot(sunDir, normal)));
     
-    outColor = vec4(occlusion*luminosity*albedo, 1.0);
+    outColor = vec4(luminosity*albedo, 1.0);
+    // outColor = vec4(occlusion*luminosity*albedo, 1.0);
     // outColor = vec4(vec3(occlusion), 1.0);
     // FragColor = vec4(TexCoords, 0.0, 1.0);
 }  

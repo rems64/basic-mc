@@ -19,102 +19,11 @@
 
 #include "blocks.h"
 #include "generation.h"
+#include "player.h"
+#include "types.h"
+#include "world.h"
 
 using namespace std;
-
-typedef struct Transform
-{
-    glm::vec3 position = {0, 0, 0};
-    glm::vec3 scale = {1, 1, 1};
-    glm::vec3 rotation = {0, 0, 0};
-
-    glm::mat4 transform;
-    bool dirty;
-} Transform_t;
-
-typedef struct Camera
-{
-    float fov;
-    float near;
-    float far;
-
-    float freeflight_speed = 0.05f;
-
-    glm::vec3 position;
-    glm::vec3 direction;
-    float yaw;
-    float pitch;
-    glm::vec3 up = {0, 0, 1};
-} Camera_t;
-
-typedef struct mInput
-{
-    double last_x = -1;
-    double last_y = -1;
-    bool mouse_capture = false;
-} mInput_t;
-
-typedef struct mDebugContext
-{
-    float ssao_strength = 1.f;
-} mDebugContext_t;
-
-typedef struct mContext
-{
-    int fps = 0;
-    int dt = 0;
-    uint32_t target_fps = 60;
-    uint32_t dc = 0;
-    mInput_t input;
-    mDebugContext_t debug;
-    Camera_t *main_camera = nullptr;
-} mContext_t;
-
-typedef struct Block
-{
-    BlockId_t block_id;
-    glm::vec3 tint = {1., 1., 1.};
-} Block_t;
-
-static Block_t block_air = {BlockId_t{0}};
-
-// Slice: 16x16x16
-// Chunk: 16x16x384, 24 slices high
-
-typedef struct Slice
-{
-    uint8_t z;
-    uint8_t index;
-    std::vector<float> vertices;
-    std::vector<unsigned int> indices;
-    unsigned int vao;
-    unsigned int vbo;
-    unsigned int ebo;
-    std::vector<Block_t> table;
-    uint16_t blocks[4096];
-} Slice_t;
-
-typedef struct Chunk
-{
-    int64_t x;
-    int64_t y;
-    uint32_t section_x;
-    uint32_t section_y;
-    Slice_t slices[24];
-} Chunk_t;
-
-typedef struct Section
-{
-    int64_t x;
-    int64_t y;
-    Chunk_t *chunks[16 * 16];
-} Section_t;
-
-typedef struct World
-{
-    Section_t section;
-    Perlin_t heightmap;
-} World_t;
 
 // clang-format off
 std::vector<float> cube_vertices = {
@@ -181,16 +90,6 @@ void init_chunk(Chunk_t *chunk, Section_t *section, int64_t x, int64_t y)
     {
         init_slice(&chunk->slices[slice]);
     }
-}
-
-constexpr size_t block_index(uint8_t x, uint8_t y, uint8_t z)
-{
-    return x + 16 * y + 256 * z;
-}
-
-size_t chunk_id(uint32_t x, uint32_t y)
-{
-    return x + 16 * y;
 }
 
 inline int positive_mod(int i, int n)
@@ -282,7 +181,7 @@ Block_t *get_block(Section_t *section, Chunk_t *chunk, Slice_t *slice, int32_t x
 
 void generate_chunk(World_t *world, Chunk_t *chunk)
 {
-    for (size_t slice_index = 0; slice_index < 12; slice_index++)
+    for (size_t slice_index = 0; slice_index < 24; slice_index++)
     {
         Slice_t *slice = &chunk->slices[slice_index];
         slice->table.push_back(block_air);              // AIR
@@ -335,21 +234,6 @@ void generate_chunk(World_t *world, Chunk_t *chunk)
     }
 }
 
-uint16_t *get_global_block(World_t *world, int64_t x, int64_t y, int64_t z)
-{
-    if (x < 0 || y < 0 || x > 256 || y > 256 || z < 0 || z > 16 * 24)
-        return NULL;
-    Section_t *section = &world->section;
-    int64_t chunk_x = x / 16;
-    int64_t chunk_y = y / 16;
-    Chunk_t *chunk = section->chunks[chunk_id(x / 16, y / 16)];
-    Slice_t *slice = &chunk->slices[z / 16];
-    uint8_t block_x = x - chunk->x;
-    uint8_t block_y = y - chunk->y;
-    uint8_t block_z = z - slice->z;
-    return &slice->blocks[block_index(block_x, block_y, block_z)];
-}
-
 void fill_rect(World_t *world, glm::vec3 min, glm::vec3 max, int16_t val)
 {
     for (int64_t x = min.x; x <= max.x; x++)
@@ -369,7 +253,7 @@ void fill_rect(World_t *world, glm::vec3 min, glm::vec3 max, int16_t val)
 void spawn_tree(World_t *world, glm::vec3 position, uint32_t height)
 {
     glm::vec3 top = position + glm::vec3(0, 0, height);
-    fill_rect(world, top - glm::vec3(1, 1, 1), top + glm::vec3(1, 1, 1), 6);
+    fill_rect(world, top - glm::vec3(2, 2, 2), top + glm::vec3(2, 2, 2), 6);
     for (size_t i = 0; i < height; i++)
     {
         uint16_t *block = get_global_block(world, position.x, position.y, position.z + i);
@@ -460,13 +344,26 @@ std::pair<std::pair<float, float>, std::pair<float, float>> get_uv_offset(BlockI
     return std::make_pair(std::make_pair(16.f * uv_offsets[face].first.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].first.second / TEXTURE_BLOCKS_HEIGHT), std::make_pair(16.f * uv_offsets[face].second.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].second.second / TEXTURE_BLOCKS_HEIGHT));
 }
 
-void generate_slice_mesh(World_t *world, std::vector<float> *vertices, std::vector<unsigned int> *indices, Chunk_t *chunk, uint8_t slice_index)
+bool contains_and_not(std::vector<int> *vec, int elem, int dis)
+{
+    if (elem == dis)
+        return false;
+    for (size_t i = 0; i < vec->size(); i++)
+    {
+        if ((*vec)[i] == elem)
+            return true;
+    }
+    return false;
+}
+
+void generate_slice_mesh(World_t *world, Slice_t *slice, Chunk_t *chunk)
 {
     Section_t *section = &world->section;
-    Slice *slice = &chunk->slices[slice_index];
     float slice_x = chunk->x;
     float slice_y = chunk->y;
     float slice_z = slice->z;
+    std::vector<float> *vertices = &slice->mesh_blocks.vertices;
+    std::vector<unsigned int> *indices = &slice->mesh_blocks.indices;
     for (size_t x = 0; x < 16; x++)
     {
         for (size_t y = 0; y < 16; y++)
@@ -475,17 +372,48 @@ void generate_slice_mesh(World_t *world, std::vector<float> *vertices, std::vect
             {
                 Block_t *current_block = get_block(section, chunk, slice, x, y, z);
                 BlockId_t current_block_id = current_block->block_id;
-                // If air
-                if (current_block_id == 0)
+                bool g_top;
+                bool g_bottom;
+                bool g_left;
+                bool g_right;
+                bool g_front;
+                bool g_back;
+                switch (current_block_id)
                 {
+                case 0:
+                    // AIR
                     continue;
+                    break;
+                case 6:
+                    vertices = &slice->mesh_foliage.vertices;
+                    indices = &slice->mesh_foliage.indices;
+                    {
+                        bool next_to_air = get_block(section, chunk, slice, x, y, z - 1)->block_id == 0 |
+                                           get_block(section, chunk, slice, x, y, z + 1)->block_id == 0 |
+                                           get_block(section, chunk, slice, x - 1, y, z)->block_id == 0 |
+                                           get_block(section, chunk, slice, x + 1, y, z)->block_id == 0 |
+                                           get_block(section, chunk, slice, x, y - 1, z)->block_id == 0 |
+                                           get_block(section, chunk, slice, x, y + 1, z)->block_id == 0;
+                        g_top = next_to_air;
+                        g_bottom = next_to_air;
+                        g_left = next_to_air;
+                        g_right = next_to_air;
+                        g_front = next_to_air;
+                        g_back = next_to_air;
+                        break;
+                    }
+                default:
+                    vertices = &slice->mesh_blocks.vertices;
+                    indices = &slice->mesh_blocks.indices;
+                    std::vector<int> allowed_ids = {0, 6};
+                    g_top = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x, y, z + 1)->block_id, current_block_id);
+                    g_bottom = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x, y, z - 1)->block_id, current_block_id);
+                    g_left = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x - 1, y, z)->block_id, current_block_id);
+                    g_right = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x + 1, y, z)->block_id, current_block_id);
+                    g_front = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x, y - 1, z)->block_id, current_block_id);
+                    g_back = contains_and_not(&allowed_ids, get_block(section, chunk, slice, x, y + 1, z)->block_id, current_block_id);
+                    break;
                 }
-                bool g_top = (get_block(section, chunk, slice, x, y, z + 1)->block_id == 0);
-                bool g_bottom = (get_block(section, chunk, slice, x, y, z - 1)->block_id == 0);
-                bool g_left = (get_block(section, chunk, slice, x - 1, y, z)->block_id == 0);
-                bool g_right = (get_block(section, chunk, slice, x + 1, y, z)->block_id == 0);
-                bool g_front = (get_block(section, chunk, slice, x, y - 1, z)->block_id == 0);
-                bool g_back = (get_block(section, chunk, slice, x, y + 1, z)->block_id == 0);
 
                 if (g_left)
                 {
@@ -540,11 +468,11 @@ void buildUi()
 {
     ImGui::Begin("stats");
     ImGui::Text("FPS %i", C.fps);
-    ImGui::Text("dt %ims", C.dt);
+    ImGui::Text("dt %dms", C.dt);
     ImGui::Text("draw count %i", C.dc);
-    ImGui::SliderFloat("SSAO strength %f", &C.debug.ssao_strength, 0.f, 1.f);
+    ImGui::SliderFloat("SSAO strength", &C.debug.ssao_strength, 0.f, 1.f);
     ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 0, 240);
-    ImGui::Text("position: %f, %f, %f", C.main_camera->position.x, C.main_camera->position.y, C.main_camera->position.z);
+    ImGui::Text("position: %f, %f, %f", C.world->main_camera->position.x, C.world->main_camera->position.y, C.world->main_camera->position.z);
     ImGui::End();
 }
 
@@ -618,13 +546,13 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
         xoffset *= sensitivity;
         yoffset *= sensitivity;
 
-        C.main_camera->yaw += xoffset;
-        C.main_camera->pitch += yoffset;
+        C.world->main_camera->yaw += xoffset;
+        C.world->main_camera->pitch += yoffset;
 
-        if (C.main_camera->pitch > 89.0f)
-            C.main_camera->pitch = 89.0f;
-        if (C.main_camera->pitch < -89.0f)
-            C.main_camera->pitch = -89.0f;
+        if (C.world->main_camera->pitch > 89.0f)
+            C.world->main_camera->pitch = 89.0f;
+        if (C.world->main_camera->pitch < -89.0f)
+            C.world->main_camera->pitch = -89.0f;
     }
 }
 
@@ -661,11 +589,11 @@ void mousewheel_callback(GLFWwindow *window, double wheel_x, double wheel_y)
     {
         if (wheel_y < 0)
         {
-            C.main_camera->freeflight_speed /= 2;
+            C.world->main_camera->freeflight_speed /= 2;
         }
         else
         {
-            C.main_camera->freeflight_speed *= 2;
+            C.world->main_camera->freeflight_speed *= 2;
         }
     }
 }
@@ -678,7 +606,7 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
     {
         if (C.input.mouse_capture)
         {
-            Camera_t *camera = C.main_camera;
+            Camera_t *camera = C.world->main_camera;
             if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
             {
                 set_capture_cursor(window, false);
@@ -698,46 +626,99 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
             {
                 camera->fov = fov_backup;
             }
+            if (key == GLFW_KEY_M && action == GLFW_RELEASE)
+            {
+                switch (C.world->main_camera->mode)
+                {
+                case CameraMode::Player:
+                    C.world->main_camera->mode = CameraMode::Freeflight;
+                    break;
+                case CameraMode::Freeflight:
+                default:
+                    C.world->player->position = C.world->main_camera->position - glm::vec3(0.f, 0.f, 1.4f);
+                    C.world->player->last_position = C.world->main_camera->position - glm::vec3(0.f, 0.f, 1.4f);
+                    C.world->main_camera->mode = CameraMode::Player;
+                    break;
+                }
+            }
         }
     }
 }
 
 void update_player(GLFWwindow *window)
 {
-    Camera_t *camera = C.main_camera;
+    Camera_t *camera = C.world->main_camera;
+    Player_t *player = C.world->player;
+    player->acceleration = glm::vec3();
+    apply_gravity(player);
     double dt = C.dt;
     glm::vec3 offset = glm::vec3(0.f);
-    glm::vec3 forward = camera->direction;
-    glm::vec3 right = glm::normalize(glm::cross(camera->direction, camera->up));
-    float speed = dt * camera->freeflight_speed;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    switch (camera->mode)
     {
-        offset += camera->direction;
-    }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    case CameraMode::Freeflight:
     {
-        offset += -camera->direction;
+        glm::vec3 forward = camera->direction;
+        glm::vec3 right = glm::normalize(glm::cross(camera->direction, camera->up));
+        float speed = dt * camera->freeflight_speed;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        {
+            offset += camera->direction;
+        }
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        {
+            offset += -camera->direction;
+        }
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        {
+            offset += -right;
+        }
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        {
+            offset += right;
+        }
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+        {
+            offset += glm::vec3(0, 0, 1);
+        }
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        {
+            offset += -glm::vec3(0, 0, 1);
+        }
+        if (glm::length(offset) > 0.001f)
+        {
+            camera->position += speed * glm::normalize(offset);
+        }
     }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-    {
-        offset += -right;
+    break;
+    case CameraMode::Player:
+        glm::vec3 forward = glm::normalize(glm::vec3(camera->direction.x, camera->direction.y, 0.));
+        glm::vec3 right = glm::normalize(glm::cross(camera->direction, glm::vec3(0, 0, 1)));
+        float speed = dt * 1000.f;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        {
+            offset += forward;
+        }
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        {
+            offset += -forward;
+        }
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        {
+            offset += -right;
+        }
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        {
+            offset += right;
+        }
+        if (glm::length(offset) > 0.001f)
+        {
+            player->acceleration = speed * glm::normalize(offset);
+        }
+        camera->position = C.world->player->position + glm::vec3(0.f, 0.f, 1.4f);
+        break;
     }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-    {
-        offset += right;
-    }
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-    {
-        offset += glm::vec3(0, 0, 1);
-    }
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-    {
-        offset += -glm::vec3(0, 0, 1);
-    }
-    if (glm::length(offset) > 0.001f)
-    {
-        camera->position += speed * glm::normalize(offset);
-    }
+    update_verlet(player, C.dt);
+    solve_collision(player, C.world);
 }
 
 void init_world(World_t *world)
@@ -874,18 +855,26 @@ int main(int argc, char **argv)
     // Shader select
     glUseProgram(cube_shader_program);
 
+    World_t world;
+    init_world(&world);
+    C.world = &world;
+
     Camera_t camera = {};
     camera.fov = 60.f / 180.f * glm::pi<float>();
     camera.near = 0.1;
     camera.far = 1000.;
     camera.position = glm::vec3(-10.f, -10.f, 10.f);
-    C.main_camera = &camera;
+    C.world->main_camera = &camera;
+
+    Player_t player;
+    player.position = glm::vec3(30., 30., 60.);
+    player.last_position = glm::vec3(30., 30., 60.0);
+    world.player = &player;
+    // camera.mode = CameraMode::Player;
+    camera.mode = CameraMode::Freeflight;
 
     // Uniforms
     int modelLoc = glGetUniformLocation(cube_shader_program, "view_projection");
-
-    World_t world;
-    init_world(&world);
 
     for (int i = 0; i < 10; i++)
     {
@@ -913,23 +902,48 @@ int main(int argc, char **argv)
             Chunk_t *chunk = world.section.chunks[chunk_id(j, i)];
             if (chunk == NULL)
                 continue;
-            for (size_t slice_index = 0; slice_index < 10; slice_index++)
+            for (size_t slice_index = 0; slice_index < 24; slice_index++)
             {
                 Slice_t *slice = &chunk->slices[slice_index];
-                generate_slice_mesh(&world, &slice->vertices, &slice->indices, chunk, slice_index);
+                generate_slice_mesh(&world, slice, chunk);
                 // VAO
-                glGenVertexArrays(1, &slice->vao);
-                glGenBuffers(1, &slice->vbo);
-                glGenBuffers(1, &slice->ebo);
+                glGenVertexArrays(1, &slice->mesh_blocks.vao);
+                glGenBuffers(1, &slice->mesh_blocks.vbo);
+                glGenBuffers(1, &slice->mesh_blocks.ebo);
 
-                glBindVertexArray(slice->vao);
+                glBindVertexArray(slice->mesh_blocks.vao);
 
                 // VBO
-                glBindBuffer(GL_ARRAY_BUFFER, slice->vbo);
-                glBufferData(GL_ARRAY_BUFFER, slice->vertices.size() * sizeof(float), slice->vertices.data(), GL_STATIC_DRAW);
+                glBindBuffer(GL_ARRAY_BUFFER, slice->mesh_blocks.vbo);
+                glBufferData(GL_ARRAY_BUFFER, slice->mesh_blocks.vertices.size() * sizeof(float), slice->mesh_blocks.vertices.data(), GL_STATIC_DRAW);
                 // EBO
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->ebo);
-                glBufferData(GL_ELEMENT_ARRAY_BUFFER, slice->indices.size() * sizeof(unsigned int), slice->indices.data(), GL_STATIC_DRAW);
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->mesh_blocks.ebo);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, slice->mesh_blocks.indices.size() * sizeof(unsigned int), slice->mesh_blocks.indices.data(), GL_STATIC_DRAW);
+
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)0);
+                glEnableVertexAttribArray(0);
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(3 * sizeof(float)));
+                glEnableVertexAttribArray(1);
+                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(6 * sizeof(float)));
+                glEnableVertexAttribArray(2);
+                glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(8 * sizeof(float)));
+                glEnableVertexAttribArray(3);
+                glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)(10 * sizeof(float)));
+                glEnableVertexAttribArray(4);
+
+                // VAO
+                glGenVertexArrays(1, &slice->mesh_foliage.vao);
+                glGenBuffers(1, &slice->mesh_foliage.vbo);
+                glGenBuffers(1, &slice->mesh_foliage.ebo);
+
+                glBindVertexArray(slice->mesh_foliage.vao);
+
+                // VBO
+                glBindBuffer(GL_ARRAY_BUFFER, slice->mesh_foliage.vbo);
+                glBufferData(GL_ARRAY_BUFFER, slice->mesh_foliage.vertices.size() * sizeof(float), slice->mesh_foliage.vertices.data(), GL_STATIC_DRAW);
+                // EBO
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slice->mesh_foliage.ebo);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, slice->mesh_foliage.indices.size() * sizeof(unsigned int), slice->mesh_foliage.indices.data(), GL_STATIC_DRAW);
 
                 glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 13 * sizeof(float), (void *)0);
                 glEnableVertexAttribArray(0);
@@ -990,7 +1004,6 @@ int main(int argc, char **argv)
         ssaoNoise.push_back(noise);
     }
 
-
     unsigned int noiseTexture;
     glGenTextures(1, &noiseTexture);
     glBindTexture(GL_TEXTURE_2D, noiseTexture);
@@ -1005,7 +1018,7 @@ int main(int argc, char **argv)
     glfwSetScrollCallback(window, mousewheel_callback);
     glfwSetKeyCallback(window, key_callback);
 
-    double last_frame_time = 0.f;
+    double last_frame_time = glfwGetTime();
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1017,10 +1030,10 @@ int main(int argc, char **argv)
             continue;
         }
         C.fps = int(1. / elapsed_time);
-        C.dt = int(1000. * elapsed_time);
+        C.dt = elapsed_time;
 
         update_player(window);
-        Camera_t *camera = C.main_camera;
+        Camera_t *camera = C.world->main_camera;
         camera->direction = {cos(glm::radians(camera->yaw)) * cos(glm::radians(camera->pitch)), -sin(glm::radians(camera->yaw)) * cos(glm::radians(camera->pitch)), sin(glm::radians(camera->pitch))};
         glm::mat4 view = glm::lookAt(camera->position, camera->position + camera->direction, camera->up);
         glm::mat4 projection = glm::perspective(camera->fov, (float)screen_width / (float)screen_height, camera->near, camera->far);
@@ -1044,7 +1057,6 @@ int main(int argc, char **argv)
 
         // Render to g-buffer
         glEnable(GL_DEPTH_TEST);
-        glEnable(GL_CULL_FACE);
 
         glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1066,13 +1078,25 @@ int main(int argc, char **argv)
                 Slice_t *slice = &chunk->slices[slice_index];
                 if (slice == nullptr)
                     continue;
-                const size_t count = slice->indices.size();
-                if (count == 0)
-                    continue;
-                glBindVertexArray(slice->vao);
+                size_t count = slice->mesh_blocks.indices.size();
+                if (count != 0)
+                {
+                    glBindVertexArray(slice->mesh_blocks.vao);
 
-                glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
-                C.dc++;
+                    glEnable(GL_CULL_FACE);
+                    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
+                    C.dc++;
+                }
+
+                count = slice->mesh_foliage.indices.size();
+                if (count != 0)
+                {
+                    glBindVertexArray(slice->mesh_foliage.vao);
+
+                    // glDisable(GL_CULL_FACE);
+                    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
+                    C.dc++;
+                }
             }
         }
 
@@ -1087,10 +1111,10 @@ int main(int argc, char **argv)
 
         glUseProgram(deferred_shader_program);
         glUniformMatrix4fv(glGetUniformLocation(deferred_shader_program, "projection"), 1, GL_FALSE, glm::value_ptr(VP));
-        glUniform1fv(glGetUniformLocation(deferred_shader_program, "ssao_strength"), 1, &C.debug.ssao_strength); 
+        glUniform1fv(glGetUniformLocation(deferred_shader_program, "ssao_strength"), 1, &C.debug.ssao_strength);
         for (unsigned int i = 0; i < 64; ++i)
-            glUniform3fv(glGetUniformLocation(deferred_shader_program, ("hemisphere_samples[" + std::to_string(i) + "]").c_str()), 1, &ssaoKernel[i][0]); 
-        
+            glUniform3fv(glGetUniformLocation(deferred_shader_program, ("hemisphere_samples[" + std::to_string(i) + "]").c_str()), 1, &ssaoKernel[i][0]);
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, gPosition);
         glActiveTexture(GL_TEXTURE1);
