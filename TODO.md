@@ -1,3 +1,4 @@
+- draw calls optimization
 - unified blocks access
 - generate uvs on gpu
 - lights
