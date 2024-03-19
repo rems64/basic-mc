@@ -468,10 +468,10 @@ void buildUi()
 {
     ImGui::Begin("stats");
     ImGui::Text("FPS %i", C.fps);
-    ImGui::Text("dt %dms", C.dt);
+    ImGui::Text("dt %fms", (float)C.dt);
     ImGui::Text("draw count %i", C.dc);
     ImGui::SliderFloat("SSAO strength", &C.debug.ssao_strength, 0.f, 1.f);
-    ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 0, 240);
+    ImGui::SliderInt("Target fps", (int *)(&C.target_fps), 10, 240);
     ImGui::Text("position: %f, %f, %f", C.world->main_camera->position.x, C.world->main_camera->position.y, C.world->main_camera->position.z);
     ImGui::End();
 }
@@ -717,7 +717,7 @@ void update_player(GLFWwindow *window)
         camera->position = C.world->player->position + glm::vec3(0.f, 0.f, 1.4f);
         break;
     }
-    update_verlet(player, C.dt);
+    update_verlet(player, (float)C.dt, (float)C.last_dt);
     solve_collision(player, C.world);
 }
 
@@ -1030,7 +1030,9 @@ int main(int argc, char **argv)
             continue;
         }
         C.fps = int(1. / elapsed_time);
+        C.last_dt = C.dt;
         C.dt = elapsed_time;
+        last_time = current_time;
 
         update_player(window);
         Camera_t *camera = C.world->main_camera;
@@ -1133,7 +1135,6 @@ int main(int argc, char **argv)
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
         glfwPollEvents();
-        last_time = current_time;
     }
     for (size_t i = 0; i < sizeof(world.section.chunks) / sizeof(Chunk_t *); i++)
     {

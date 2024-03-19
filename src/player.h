@@ -10,10 +10,11 @@ void apply_gravity(Player_t *player)
     player->acceleration.z -= 32.f;
 }
 
-void update_verlet(Player_t *player, float dt)
+void update_verlet(Player_t *player, float dt, float last_dt)
 {
     glm::vec3 position = player->position;
-    player->position = 2.f * player->position - player->last_position + player->acceleration * dt * dt;
+    // player->position = 2.f * player->position - player->last_position + player->acceleration * dt * dt;
+    player->position = player->position + (player->position-player->last_position)*dt/last_dt + player->acceleration * (dt + last_dt)/2.f*dt;
     player->last_position = position;
 }
 

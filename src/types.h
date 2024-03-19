@@ -115,6 +115,7 @@ typedef struct World
 typedef struct mContext
 {
     int fps = 0;
+    double last_dt = 0.;
     double dt = 0.;
     uint32_t target_fps = 60;
     uint32_t dc = 0;
