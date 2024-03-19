@@ -1,13 +1,14 @@
-- draw calls optimization
-- unified blocks access
-- generate uvs on gpu
+- [ ] draw calls optimization
+- [ ] ticking system (draw tick, redstone tick, physics tick, behavior tick)
+- [ ] unified blocks access
+- [ ] generate uvs on gpu
+- [ ] trees
+- [ ] structures
 - lights
-- shadow cascades
-- pcf shadows
-- ticking system (draw tick, redstone tick, physics tick, behavior tick)
+  - [ ] point light
+  - [x] simple shadows
+  - [ ] shadow cascades
+  - [ ] pcf shadows
 - physics
-  - continuous collisions
-  - fixed timestep update
-- trees
-- structures
-- ~~simple shadows~~
+  - [ ] continuous collisions
+  - [ ] fixed timestep update
