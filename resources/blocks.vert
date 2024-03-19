@@ -8,18 +8,20 @@ layout (location = 4) in vec3 aTint;
 
 uniform mat4 view_projection;
 
-out vec3 Pos;
-out vec3 Normal;
-out vec2 UV;
-out vec2 UVOverlay;
-out vec3 Tint;
+out VS_OUT {
+   vec3 position;
+   vec3 normal;
+   vec2 uv_base;
+   vec2 uv_overlay;
+   vec3 tint;
+} vs_out;
 
 void main()
 {
    gl_Position = view_projection * vec4(aPos, 1.0);
-   Pos = aPos;
-   Normal = aNormal;
-   UV = aUV;
-   UVOverlay = aUVOoverlay;
-   Tint = aTint;
+   vs_out.position = aPos;
+   vs_out.normal = aNormal;
+   vs_out.uv_base = aUV;
+   vs_out.uv_overlay = aUVOoverlay;
+   vs_out.tint = aTint;
 }

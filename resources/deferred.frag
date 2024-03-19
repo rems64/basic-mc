@@ -12,10 +12,27 @@ uniform vec3 hemisphere_samples[64];
 uniform float ssao_strength;
 uniform mat4 projection;
 
+uniform mat4 light_space_matrix;
+layout(binding=3) uniform sampler2D shadow_map;
+
 const vec2 noiseScale = vec2(800.0/4.0, 600.0/4.0);
 const int kernelSize = 32;
 const float radius = 2.0;
 const float bias = 0.1;
+
+float compute_shadow(vec4 fragPosLightSpace)
+{
+    // perform perspective divide
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    if(projCoords.z > 1.0)
+        return 0.0;
+    float closestDepth = texture(shadow_map, projCoords.xy).r;
+    float currentDepth = projCoords.z;
+    float bias = 0.005;
+    float shadow = currentDepth - bias > closestDepth  ? 1.0 : 0.0;
+    return shadow;
+}
 
 void main()
 {
@@ -46,9 +63,12 @@ void main()
     occlusion = 1.0 - (occlusion / kernelSize);
     occlusion = 1.-ssao_strength+ssao_strength*occlusion;
 
+    vec4 FragPosLightSpace = light_space_matrix * vec4(position, 1.);
+    float shadow = compute_shadow(FragPosLightSpace);       
     vec3 sunDir = normalize(vec3(1.0, 0.0, -1.0));
     float ambiant = 0.4f;
-    float luminosity = min(1.f, ambiant+max(0.f, -dot(sunDir, normal)));
+    float luminosity = min(1.f, ambiant+max(0.f, -(1.-shadow)*dot(sunDir, normal)));
+
     
     outColor = vec4(luminosity*albedo, 1.0);
     // outColor = vec4(occlusion*luminosity*albedo, 1.0);

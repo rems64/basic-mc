@@ -284,9 +284,26 @@ void push_indices(std::vector<unsigned int> *indices, size_t offset, float norma
     }
 }
 
-void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
+std::pair<float, float> get_uv_offset(BlockId_t block_id, uint8_t face, bool overlay = false)
+{
+    const std::array<std::pair<std::pair<int, int>, std::pair<int, int>>, 6> uv_offsets = blocks_uvs[block_id];
+    if (overlay)
+    {
+        return std::make_pair(16.f * uv_offsets[face].second.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].second.second / TEXTURE_BLOCKS_HEIGHT);
+    }
+    else
+    {
+        return std::make_pair(16.f * uv_offsets[face].first.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].first.second / TEXTURE_BLOCKS_HEIGHT);
+    }
+}
+
+void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, uint32_t base_id, glm::vec3 tint = {1., 1., 1.})
 {
     size_t offset = vertices->size() / 13;
+
+    uint8_t face = normal_direction > 0 ? 4 : 2;
+    auto [uv_x, uv_y] = get_uv_offset(base_id, face);
+    auto [uv_ov_x, uv_ov_y] = get_uv_offset(base_id, face, true);
     // clang-format off
     const std::vector<float> new_vertices = {
         (float)x, (float)y, (float)z, (float)normal_direction, 0.f, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y, 0.f+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
@@ -302,10 +319,23 @@ void add_face_x(std::vector<float> *vertices, std::vector<unsigned int> *indices
     push_indices(indices, offset, -normal_direction);
 }
 
-void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
+void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, uint32_t base_id, glm::vec3 tint = {1., 1., 1.})
 {
     size_t offset = vertices->size() / 13;
+
+    uint8_t face = normal_direction > 0 ? 3 : 1;
+    auto [uv_x, uv_y] = get_uv_offset(base_id, face);
+    auto [uv_ov_x, uv_ov_y] = get_uv_offset(base_id, face, true);
+
     // clang-format off
+    // Face_id: top(0), front(1), left(2), back(3), right(4), bottom(5)
+    // const float face_id = normal_direction?0.f:1.f;
+    // const std::vector<float> new_vertices = {
+    //     (float)x, (float)y, (float)z, face_id, block_base_id, block_overlay_id, tint.r, tint.g, tint.b,
+    //     (float)x+1.f, (float)y, (float)z, face_id, block_base_id, block_overlay_id, tint.r, tint.g, tint.b,
+    //     (float)x+1.f, (float)y, (float)z+1.f, face_id, block_base_id, block_overlay_id, tint.r, tint.g, tint.b,
+    //     (float)x, (float)y, (float)z+1.f, face_id, block_base_id, block_overlay_id, tint.r, tint.g, tint.b
+    // };
     const std::vector<float> new_vertices = {
         (float)x, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, 0.f+uv_x, TEXTURE_TILE_HEIGHT+uv_y, 0.f+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
         (float)x+1.f, (float)y, (float)z, 0.f, (float)normal_direction, 0.f, TEXTURE_TILE_WIDTH+uv_x, TEXTURE_TILE_HEIGHT+uv_y, TEXTURE_TILE_WIDTH+uv_ov_x, TEXTURE_TILE_HEIGHT+uv_ov_y, tint.r, tint.g, tint.b,
@@ -320,9 +350,14 @@ void add_face_y(std::vector<float> *vertices, std::vector<unsigned int> *indices
     push_indices(indices, offset, normal_direction);
 }
 
-void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, float uv_x, float uv_y, float uv_ov_x, float uv_ov_y, glm::vec3 tint = {1., 1., 1.})
+void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices, int64_t x, int64_t y, int64_t z, float slice_height, float normal_direction, uint32_t base_id, glm::vec3 tint = {1., 1., 1.})
 {
     size_t offset = vertices->size() / 13;
+
+    uint8_t face = normal_direction > 0 ? 0 : 5;
+    auto [uv_x, uv_y] = get_uv_offset(base_id, face);
+    auto [uv_ov_x, uv_ov_y] = get_uv_offset(base_id, face, true);
+
     // clang-format off
     const std::vector<float> new_vertices = {
         (float)x, (float)y, (float)z, 0.f, 0.f, (float)normal_direction, 0.f+uv_x, 0.f+uv_y, 0.f+uv_ov_x, 0.f+uv_ov_y, tint.r, tint.g, tint.b,
@@ -336,12 +371,6 @@ void add_face_z(std::vector<float> *vertices, std::vector<unsigned int> *indices
     vertices->insert(vertices->end(), new_vertices.begin(), new_vertices.end());
 
     push_indices(indices, offset, -normal_direction);
-}
-
-std::pair<std::pair<float, float>, std::pair<float, float>> get_uv_offset(BlockId_t block_id, uint8_t face)
-{
-    const std::array<std::pair<std::pair<int, int>, std::pair<int, int>>, 6> uv_offsets = blocks_uvs[block_id];
-    return std::make_pair(std::make_pair(16.f * uv_offsets[face].first.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].first.second / TEXTURE_BLOCKS_HEIGHT), std::make_pair(16.f * uv_offsets[face].second.first / TEXTURE_BLOCKS_WIDTH, 16.f * uv_offsets[face].second.second / TEXTURE_BLOCKS_HEIGHT));
 }
 
 bool contains_and_not(std::vector<int> *vec, int elem, int dis)
@@ -417,45 +446,27 @@ void generate_slice_mesh(World_t *world, Slice_t *slice, Chunk_t *chunk)
 
                 if (g_left)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 2);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_x(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_x(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, current_block_id, current_block->tint);
                 }
                 if (g_right)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 4);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_x(vertices, indices, x + slice_x + 1, y + slice_y, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_x(vertices, indices, x + slice_x + 1, y + slice_y, z + slice_z, slice_z, 1, current_block_id, current_block->tint);
                 }
                 if (g_front)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 1);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_y(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_y(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, current_block_id, current_block->tint);
                 }
                 if (g_back)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 3);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_y(vertices, indices, x + slice_x, y + slice_y + 1, z + slice_z, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_y(vertices, indices, x + slice_x, y + slice_y + 1, z + slice_z, slice_z, 1, current_block_id, current_block->tint);
                 }
                 if (g_bottom)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 5);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z, slice_z, -1, current_block_id, current_block->tint);
                 }
                 if (g_top)
                 {
-                    auto [uv_offset, uv_overlay_offset] = get_uv_offset(current_block_id, 0);
-                    auto [uv_offset_x, uv_offset_y] = uv_offset;
-                    auto [uv_overlay_offset_x, uv_overlay_offset_y] = uv_overlay_offset;
-                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z + 1, slice_z, 1, uv_offset_x, uv_offset_y, uv_overlay_offset_x, uv_overlay_offset_y, current_block->tint);
+                    add_face_z(vertices, indices, x + slice_x, y + slice_y, z + slice_z + 1, slice_z, 1, current_block_id, current_block->tint);
                 }
             }
         }
@@ -498,26 +509,44 @@ char *readfile(const char *filepath)
     return buffer;
 }
 
-void create_shader(const char *vertex_path, const char *fragment_path, unsigned int *program)
+void create_shader(const char *vertex_path, const char *fragment_path, unsigned int *program, const char *geometry_path = NULL)
 {
+    unsigned int vertex_shader, fragment_shader, geometry_shader = 0;
     *program = glCreateProgram();
     char *vertex_shader_source = readfile(vertex_path);
-    unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    vertex_shader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
     glCompileShader(vertex_shader);
     free(vertex_shader_source);
 
     char *fragment_shader_source = readfile(fragment_path);
-    unsigned int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
     glCompileShader(fragment_shader);
     free(fragment_shader_source);
 
+    if (geometry_path != NULL)
+    {
+        char *geometry_shader_source = readfile(geometry_path);
+        geometry_shader = glCreateShader(GL_GEOMETRY_SHADER);
+        glShaderSource(geometry_shader, 1, &geometry_shader_source, NULL);
+        glCompileShader(geometry_shader);
+        free(geometry_shader_source);
+    }
+
     glAttachShader(*program, vertex_shader);
     glAttachShader(*program, fragment_shader);
+    if (geometry_shader != 0)
+    {
+        glAttachShader(*program, geometry_shader);
+    }
     glLinkProgram(*program);
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
+    if (geometry_shader != 0)
+    {
+        glDeleteShader(geometry_shader);
+    }
 }
 
 void update_transform(Transform_t *transform)
@@ -790,6 +819,41 @@ void record_framebuffer(unsigned int *gBuffer, unsigned int *gPosition, unsigned
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void render_world(World_t *world)
+{
+    for (size_t i = 0; i < sizeof(world->section.chunks) / sizeof(Chunk_t *); i++)
+    {
+        if (world->section.chunks[i] == nullptr)
+            continue;
+        Chunk_t *chunk = world->section.chunks[i];
+        for (size_t slice_index = 0; slice_index < 24; slice_index++)
+        {
+            Slice_t *slice = &chunk->slices[slice_index];
+            if (slice == nullptr)
+                continue;
+            size_t count = slice->mesh_blocks.indices.size();
+            if (count != 0)
+            {
+                glBindVertexArray(slice->mesh_blocks.vao);
+
+                glEnable(GL_CULL_FACE);
+                glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
+                C.dc++;
+            }
+
+            count = slice->mesh_foliage.indices.size();
+            if (count != 0)
+            {
+                glBindVertexArray(slice->mesh_foliage.vao);
+
+                // glDisable(GL_CULL_FACE);
+                glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
+                C.dc++;
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (!glfwInit())
@@ -1020,6 +1084,34 @@ int main(int argc, char **argv)
 
     double last_frame_time = glfwGetTime();
 
+    // Shadows
+    unsigned int shadow_depth_fbo;
+    glGenFramebuffers(1, &shadow_depth_fbo);
+    const unsigned int shadow_width = 4096, shadow_height = 4096;
+    unsigned int shadow_depth_map;
+    glGenTextures(1, &shadow_depth_map);
+    glBindTexture(GL_TEXTURE_2D, shadow_depth_map);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
+                 shadow_width, shadow_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_depth_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_depth_map, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    unsigned int shadow_shader_program;
+    create_shader("resources/shadow.vert", "resources/shadow.frag", &shadow_shader_program);
+
+    float near_plane = 10.0f, far_plane = 200.f;
+
+    double t = 0.;
     while (!glfwWindowShouldClose(window))
     {
         C.dc = 0;
@@ -1033,6 +1125,15 @@ int main(int argc, char **argv)
         C.last_dt = C.dt;
         C.dt = elapsed_time;
         last_time = current_time;
+        t += elapsed_time;
+
+        // Update light position
+        const float light_speed = 0.1f;
+        glm::mat4 lightProjection = glm::ortho(-100.0f, 100.f, -100.0f, 100.0f, near_plane, far_plane);
+        glm::mat4 lightView = glm::lookAt(glm::vec3(80.f + 90.0f * glm::cos(light_speed * (float)t), 80.0f + 90.f * glm::sin(light_speed * (float)t), 80.0f),
+                                          glm::vec3(80.0f, 80.0f, 40.0f),
+                                          glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::mat4 lightSpaceMatrix = lightProjection * lightView;
 
         update_player(window);
         Camera_t *camera = C.world->main_camera;
@@ -1054,13 +1155,22 @@ int main(int argc, char **argv)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // Shadows
+        glEnable(GL_DEPTH_TEST);
+        glBindFramebuffer(GL_FRAMEBUFFER, shadow_depth_fbo);
+        glViewport(0, 0, shadow_width, shadow_height);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(shadow_shader_program);
+        glUniformMatrix4fv(glGetUniformLocation(shadow_shader_program, "light_space_matrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+        render_world(&world);
+
+        // glClearColor(0.0, 0.0, 0.0, 1.0);
+        // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Render to g-buffer
-        glEnable(GL_DEPTH_TEST);
-
         glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+        glEnable(GL_DEPTH_TEST);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glViewport(0, 0, screen_width, screen_height);
 
@@ -1070,37 +1180,7 @@ int main(int argc, char **argv)
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, blocks_texture);
 
-        for (size_t i = 0; i < sizeof(world.section.chunks) / sizeof(Chunk_t *); i++)
-        {
-            if (world.section.chunks[i] == nullptr)
-                continue;
-            Chunk_t *chunk = world.section.chunks[i];
-            for (size_t slice_index = 0; slice_index < 24; slice_index++)
-            {
-                Slice_t *slice = &chunk->slices[slice_index];
-                if (slice == nullptr)
-                    continue;
-                size_t count = slice->mesh_blocks.indices.size();
-                if (count != 0)
-                {
-                    glBindVertexArray(slice->mesh_blocks.vao);
-
-                    glEnable(GL_CULL_FACE);
-                    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
-                    C.dc++;
-                }
-
-                count = slice->mesh_foliage.indices.size();
-                if (count != 0)
-                {
-                    glBindVertexArray(slice->mesh_foliage.vao);
-
-                    // glDisable(GL_CULL_FACE);
-                    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
-                    C.dc++;
-                }
-            }
-        }
+        render_world(&world);
 
         // Deferred
         glDisable(GL_DEPTH_TEST);
@@ -1113,6 +1193,7 @@ int main(int argc, char **argv)
 
         glUseProgram(deferred_shader_program);
         glUniformMatrix4fv(glGetUniformLocation(deferred_shader_program, "projection"), 1, GL_FALSE, glm::value_ptr(VP));
+        glUniformMatrix4fv(glGetUniformLocation(deferred_shader_program, "light_space_matrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
         glUniform1fv(glGetUniformLocation(deferred_shader_program, "ssao_strength"), 1, &C.debug.ssao_strength);
         for (unsigned int i = 0; i < 64; ++i)
             glUniform3fv(glGetUniformLocation(deferred_shader_program, ("hemisphere_samples[" + std::to_string(i) + "]").c_str()), 1, &ssaoKernel[i][0]);
@@ -1123,6 +1204,8 @@ int main(int argc, char **argv)
         glBindTexture(GL_TEXTURE_2D, gNormal);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, gColor);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, shadow_depth_map);
         glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, noiseTexture);
 

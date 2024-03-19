@@ -1,10 +1,12 @@
 - unified blocks access
 - generate uvs on gpu
 - lights
-- shadows
+- shadow cascades
+- pcf shadows
 - ticking system (draw tick, redstone tick, physics tick, behavior tick)
 - physics
   - continuous collisions
   - fixed timestep update
 - trees
 - structures
+- ~~simple shadows~~
